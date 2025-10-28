@@ -102,9 +102,9 @@ def query_ball_point(radius, nsample, xyz, new_xyz):
     sqrdists = square_distance(new_xyz, xyz) # [24, 512, 3], [24, 1024, 3]，计算均方距离
     group_idx[sqrdists > radius ** 2] = N # 在query ball之外的设置为N，N非法
     group_idx = group_idx.sort(dim=-1)[0][:, :, :nsample] # 最后一个维度升序排列，然后取前nsample个点
-    group_first = group_idx[:, :, 0].view(B, S, 1).repeat([1, 1, nsample])
+    group_first = group_idx[:, :, 0].view(B, S, 1).repeat([1, 1, nsample]) # 至少有一个点，即采样点本身
     mask = group_idx == N # 取idx为N的位置
-    group_idx[mask] = group_first[mask] # idx为N处的点用query_ball中最小索引代替
+    group_idx[mask] = group_first[mask] # idx为N处的点用query_ball中最小索引代替 因此这里最差的情况是所有点都是采样点本身
     return group_idx
 
 
