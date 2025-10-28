@@ -25,12 +25,12 @@ class PartNormalDataset(Dataset):
         with open(self.catfile, 'r') as f:
             for line in f:
                 ls = line.strip().split()
-                self.cat[ls[0]] = ls[1]
+                self.cat[ls[0]] = ls[1] # {class_name: directory_id}
         self.cat = {k: v for k, v in self.cat.items()}
-        self.classes_original = dict(zip(self.cat, range(len(self.cat))))
+        self.classes_original = dict(zip(self.cat, range(len(self.cat)))) # class_name: idx
 
         if not class_choice is  None:
-            self.cat = {k:v for k,v in self.cat.items() if k in class_choice}
+            self.cat = {k:v for k,v in self.cat.items() if k in class_choice} # 筛选特定的类
         # print(self.cat)
 
         self.meta = {}
@@ -40,10 +40,10 @@ class PartNormalDataset(Dataset):
             val_ids = set([str(d.split('/')[2]) for d in json.load(f)])
         with open(os.path.join(self.root, 'train_test_split', 'shuffled_test_file_list.json'), 'r') as f:
             test_ids = set([str(d.split('/')[2]) for d in json.load(f)])
-        for item in self.cat:
+        for item in self.cat: # 遍历每个类别
             # print('category', item)
             self.meta[item] = []
-            dir_point = os.path.join(self.root, self.cat[item])
+            dir_point = os.path.join(self.root, self.cat[item]) # 由item类别获得对应的文件夹
             fns = sorted(os.listdir(dir_point))
             # print(fns[0][0:-4])
             if split == 'trainval':
@@ -93,18 +93,18 @@ class PartNormalDataset(Dataset):
             fn = self.datapath[index]
             cat = self.datapath[index][0]
             cls = self.classes[cat]
-            cls = np.array([cls]).astype(np.int32)
+            cls = np.array([cls]).astype(np.int32) # 整体的类别
             data = np.loadtxt(fn[1]).astype(np.float32)
             if not self.normal_channel:
                 point_set = data[:, 0:3]
             else:
                 point_set = data[:, 0:6]
-            seg = data[:, -1].astype(np.int32)
+            seg = data[:, -1].astype(np.int32) # 最后一位是每个点对应的label，应该是属于同一个类别目标中某个part的label
             if len(self.cache) < self.cache_size:
                 self.cache[index] = (point_set, cls, seg)
-        point_set[:, 0:3] = pc_normalize(point_set[:, 0:3])
+        point_set[:, 0:3] = pc_normalize(point_set[:, 0:3]) # 计算相对坐标并归一化到最大半径的ball中
 
-        choice = np.random.choice(len(seg), self.npoints, replace=True)
+        choice = np.random.choice(len(seg), self.npoints, replace=True) # 允许重复采样，在len(seg)索引范围内采样self.npoints个点
         # resample
         point_set = point_set[choice, :]
         seg = seg[choice]

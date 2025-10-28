@@ -13,7 +13,7 @@ class get_model(nn.Module):
         self.sa3 = PointNetSetAbstraction(npoint=None, radius=None, nsample=None, in_channel=256 + 3, mlp=[256, 512, 1024], group_all=True)
         self.fc1 = nn.Linear(1024, 512)
         self.bn1 = nn.BatchNorm1d(512)
-        self.drop1 = nn.Dropout(0.4)
+        self.drop1 = nn.Dropout(0.4) # 神经元有40%的概率被舍弃
         self.fc2 = nn.Linear(512, 256)
         self.bn2 = nn.BatchNorm1d(256)
         self.drop2 = nn.Dropout(0.4)
@@ -27,13 +27,13 @@ class get_model(nn.Module):
         else:
             norm = None
         l1_xyz, l1_points = self.sa1(xyz, norm)
-        l2_xyz, l2_points = self.sa2(l1_xyz, l1_points)
+        l2_xyz, l2_points = self.sa2(l1_xyz, l1_points) # l1_xyz 为采样点坐标，l1_points为对应的特征
         l3_xyz, l3_points = self.sa3(l2_xyz, l2_points)
         x = l3_points.view(B, 1024)
         x = self.drop1(F.relu(self.bn1(self.fc1(x))))
         x = self.drop2(F.relu(self.bn2(self.fc2(x))))
         x = self.fc3(x)
-        x = F.log_softmax(x, -1)
+        x = F.log_softmax(x, -1) # log_softmax，为了后续使用nll_loss
 
 
         return x, l3_points

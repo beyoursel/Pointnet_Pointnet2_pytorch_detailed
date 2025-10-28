@@ -28,7 +28,7 @@ def parse_args():
     parser = argparse.ArgumentParser('training')
     parser.add_argument('--use_cpu', action='store_true', default=False, help='use cpu mode')
     parser.add_argument('--gpu', type=str, default='0', help='specify gpu device')
-    parser.add_argument('--batch_size', type=int, default=24, help='batch size in training')
+    parser.add_argument('--batch_size', type=int, default=4, help='batch size in training')
     parser.add_argument('--model', default='pointnet_cls', help='model name [default: pointnet_cls]')
     parser.add_argument('--num_category', default=40, type=int, choices=[10, 40],  help='training on ModelNet10/40')
     parser.add_argument('--epoch', default=200, type=int, help='number of epoch in training')
@@ -36,6 +36,7 @@ def parse_args():
     parser.add_argument('--num_point', type=int, default=1024, help='Point Number')
     parser.add_argument('--optimizer', type=str, default='Adam', help='optimizer for training')
     parser.add_argument('--log_dir', type=str, default=None, help='experiment root')
+    parser.add_argument('--data_path', type=str, default='data/modelnet40_normal_resampled/', help='data path for training/testing')
     parser.add_argument('--decay_rate', type=float, default=1e-4, help='decay rate')
     parser.add_argument('--use_normals', action='store_true', default=False, help='use normals')
     parser.add_argument('--process_data', action='store_true', default=False, help='save data offline')
@@ -46,7 +47,7 @@ def parse_args():
 def inplace_relu(m):
     classname = m.__class__.__name__
     if classname.find('ReLU') != -1:
-        m.inplace=True
+        m.inplace=True 
 
 
 def test(model, loader, num_class=40):
@@ -63,7 +64,7 @@ def test(model, loader, num_class=40):
         pred, _ = classifier(points)
         pred_choice = pred.data.max(1)[1]
 
-        for cat in np.unique(target.cpu()):
+        for cat in np.unique(target.cpu()): # 统计每个类别的mean acc
             classacc = pred_choice[target == cat].eq(target[target == cat].long().data).cpu().sum()
             class_acc[cat, 0] += classacc.item() / float(points[target == cat].size()[0])
             class_acc[cat, 1] += 1
@@ -71,9 +72,9 @@ def test(model, loader, num_class=40):
         correct = pred_choice.eq(target.long().data).cpu().sum()
         mean_correct.append(correct.item() / float(points.size()[0]))
 
-    class_acc[:, 2] = class_acc[:, 0] / class_acc[:, 1]
-    class_acc = np.mean(class_acc[:, 2])
-    instance_acc = np.mean(mean_correct)
+    class_acc[:, 2] = class_acc[:, 0] / class_acc[:, 1] # 每个类别mean acc
+    class_acc = np.mean(class_acc[:, 2]) # 计算所有类别的mean acc，类似mAP
+    instance_acc = np.mean(mean_correct) # 整个dataset下的mean acc
 
     return instance_acc, class_acc
 
@@ -116,7 +117,7 @@ def main(args):
 
     '''DATA LOADING'''
     log_string('Load dataset ...')
-    data_path = 'data/modelnet40_normal_resampled/'
+    data_path = args.data_path
 
     train_dataset = ModelNetDataLoader(root=data_path, args=args, split='train', process_data=args.process_data)
     test_dataset = ModelNetDataLoader(root=data_path, args=args, split='test', process_data=args.process_data)
@@ -125,14 +126,14 @@ def main(args):
 
     '''MODEL LOADING'''
     num_class = args.num_category
-    model = importlib.import_module(args.model)
+    model = importlib.import_module(args.model) # 该命令会去搜索模型文件
     shutil.copy('./models/%s.py' % args.model, str(exp_dir))
     shutil.copy('models/pointnet2_utils.py', str(exp_dir))
     shutil.copy('./train_classification.py', str(exp_dir))
 
     classifier = model.get_model(num_class, normal_channel=args.use_normals)
     criterion = model.get_loss()
-    classifier.apply(inplace_relu)
+    classifier.apply(inplace_relu) # 将relu设置为inplace=True(直接在输入张量上改动，节省内存)
 
     if not args.use_cpu:
         classifier = classifier.cuda()
@@ -158,7 +159,7 @@ def main(args):
     else:
         optimizer = torch.optim.SGD(classifier.parameters(), lr=0.01, momentum=0.9)
 
-    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=20, gamma=0.7)
+    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=20, gamma=0.7) # 每隔20个epoch，学习率下降至上一次的0.7倍
     global_epoch = 0
     global_step = 0
     best_instance_acc = 0.0
@@ -171,37 +172,38 @@ def main(args):
         mean_correct = []
         classifier = classifier.train()
 
-        scheduler.step()
+        scheduler.step() # 调整学习率
         for batch_id, (points, target) in tqdm(enumerate(trainDataLoader, 0), total=len(trainDataLoader), smoothing=0.9):
             optimizer.zero_grad()
 
-            points = points.data.numpy()
+            # points = points.data.numpy() # 转numpy, .data会返回一个新的tensor，不在计算图中跟踪梯度
+            points = points.detach().cpu().numpy()
             points = provider.random_point_dropout(points)
             points[:, :, 0:3] = provider.random_scale_point_cloud(points[:, :, 0:3])
             points[:, :, 0:3] = provider.shift_point_cloud(points[:, :, 0:3])
-            points = torch.Tensor(points)
-            points = points.transpose(2, 1)
+            points = torch.Tensor(points) # 转tensor [batch_size, 1024, 3]
+            points = points.transpose(2, 1) # [batch_size, 3, 1024]
 
             if not args.use_cpu:
                 points, target = points.cuda(), target.cuda()
 
             pred, trans_feat = classifier(points)
             loss = criterion(pred, target.long(), trans_feat)
-            pred_choice = pred.data.max(1)[1]
-
-            correct = pred_choice.eq(target.long().data).cpu().sum()
+            # pred_choice = pred.data.max(1)[1]
+            pred_choice = pred.detach().max(1)[1] # tensor.max(dim) 会返回一个元组 (values, indices)
+            correct = pred_choice.eq(target.detach().long()).cpu().sum()
             mean_correct.append(correct.item() / float(points.size()[0]))
             loss.backward()
             optimizer.step()
             global_step += 1
 
-        train_instance_acc = np.mean(mean_correct)
+        train_instance_acc = np.mean(mean_correct) # 计算一个epoch的mean acc
         log_string('Train Instance Accuracy: %f' % train_instance_acc)
 
         with torch.no_grad():
             instance_acc, class_acc = test(classifier.eval(), testDataLoader, num_class=num_class)
 
-            if (instance_acc >= best_instance_acc):
+            if (instance_acc >= best_instance_acc): # 保存最优acc的模型权重
                 best_instance_acc = instance_acc
                 best_epoch = epoch + 1
 

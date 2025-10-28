@@ -16,7 +16,7 @@ warnings.filterwarnings('ignore')
 
 def pc_normalize(pc):
     centroid = np.mean(pc, axis=0)
-    pc = pc - centroid
+    pc = pc - centroid # 计算相对坐标
     m = np.max(np.sqrt(np.sum(pc**2, axis=1)))
     pc = pc / m
     return pc
@@ -49,10 +49,10 @@ def farthest_point_sample(point, npoint):
 class ModelNetDataLoader(Dataset):
     def __init__(self, root, args, split='train', process_data=False):
         self.root = root
-        self.npoints = args.num_point
+        self.npoints = args.num_point # 1024
         self.process_data = process_data
-        self.uniform = args.use_uniform_sample
-        self.use_normals = args.use_normals
+        self.uniform = args.use_uniform_sample # 均匀采样
+        self.use_normals = args.use_normals # 使用法向量
         self.num_category = args.num_category
 
         if self.num_category == 10:
@@ -60,8 +60,8 @@ class ModelNetDataLoader(Dataset):
         else:
             self.catfile = os.path.join(self.root, 'modelnet40_shape_names.txt')
 
-        self.cat = [line.rstrip() for line in open(self.catfile)]
-        self.classes = dict(zip(self.cat, range(len(self.cat))))
+        self.cat = [line.rstrip() for line in open(self.catfile)] # line.rstrip()去除末尾的空格和换行符号
+        self.classes = dict(zip(self.cat, range(len(self.cat)))) # 获得class_name和对应的label id
 
         shape_ids = {}
         if self.num_category == 10:
@@ -90,20 +90,20 @@ class ModelNetDataLoader(Dataset):
 
                 for index in tqdm(range(len(self.datapath)), total=len(self.datapath)):
                     fn = self.datapath[index]
-                    cls = self.classes[self.datapath[index][0]]
+                    cls = self.classes[self.datapath[index][0]] # class_name to label id
                     cls = np.array([cls]).astype(np.int32)
-                    point_set = np.loadtxt(fn[1], delimiter=',').astype(np.float32)
+                    point_set = np.loadtxt(fn[1], delimiter=',').astype(np.float32) # 加载点云
 
                     if self.uniform:
-                        point_set = farthest_point_sample(point_set, self.npoints)
+                        point_set = farthest_point_sample(point_set, self.npoints) # 最远点采样
                     else:
-                        point_set = point_set[0:self.npoints, :]
+                        point_set = point_set[0:self.npoints, :] # 直接取前self.npoints个点
 
                     self.list_of_points[index] = point_set
                     self.list_of_labels[index] = cls
 
                 with open(self.save_path, 'wb') as f:
-                    pickle.dump([self.list_of_points, self.list_of_labels], f)
+                    pickle.dump([self.list_of_points, self.list_of_labels], f) # 序列化的对象可以是字典、列表等
             else:
                 print('Load processed data from %s...' % self.save_path)
                 with open(self.save_path, 'rb') as f:
@@ -124,9 +124,9 @@ class ModelNetDataLoader(Dataset):
             if self.uniform:
                 point_set = farthest_point_sample(point_set, self.npoints)
             else:
-                point_set = point_set[0:self.npoints, :]
+                point_set = point_set[0:self.npoints, :] # 1024
                 
-        point_set[:, 0:3] = pc_normalize(point_set[:, 0:3])
+        point_set[:, 0:3] = pc_normalize(point_set[:, 0:3]) # 归一化
         if not self.use_normals:
             point_set = point_set[:, 0:3]
 

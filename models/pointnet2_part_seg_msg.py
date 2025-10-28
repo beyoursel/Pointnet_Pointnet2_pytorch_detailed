@@ -36,10 +36,10 @@ class get_model(nn.Module):
         l2_xyz, l2_points = self.sa2(l1_xyz, l1_points)
         l3_xyz, l3_points = self.sa3(l2_xyz, l2_points)
         # Feature Propagation layers
-        l2_points = self.fp3(l2_xyz, l3_xyz, l2_points, l3_points)
+        l2_points = self.fp3(l2_xyz, l3_xyz, l2_points, l3_points) # l2_xyz属于SA层，l3_xyz需要插值与l2_xyz的采样点数一致
         l1_points = self.fp2(l1_xyz, l2_xyz, l1_points, l2_points)
-        cls_label_one_hot = cls_label.view(B,16,1).repeat(1,1,N)
-        l0_points = self.fp1(l0_xyz, l1_xyz, torch.cat([cls_label_one_hot,l0_xyz,l0_points],1), l1_points)
+        cls_label_one_hot = cls_label.view(B,16,1).repeat(1,1,N) # 16个类别 [B, 16, 2048] 每个点都有个label特征
+        l0_points = self.fp1(l0_xyz, l1_xyz, torch.cat([cls_label_one_hot,l0_xyz,l0_points],1), l1_points) # 这里l0_xyz和l0_points特征重复？？
         # FC layers
         feat = F.relu(self.bn1(self.conv1(l0_points)))
         x = self.drop1(feat)

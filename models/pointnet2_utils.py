@@ -34,8 +34,8 @@ def square_distance(src, dst):
     """
     B, N, _ = src.shape
     _, M, _ = dst.shape
-    dist = -2 * torch.matmul(src, dst.permute(0, 2, 1))
-    dist += torch.sum(src ** 2, -1).view(B, N, 1)
+    dist = -2 * torch.matmul(src, dst.permute(0, 2, 1)) # [24, 512, 1024]
+    dist += torch.sum(src ** 2, -1).view(B, N, 1) # [24, 512, 1]
     dist += torch.sum(dst ** 2, -1).view(B, 1, M)
     return dist
 
@@ -52,11 +52,11 @@ def index_points(points, idx):
     device = points.device
     B = points.shape[0]
     view_shape = list(idx.shape)
-    view_shape[1:] = [1] * (len(view_shape) - 1)
-    repeat_shape = list(idx.shape)
+    view_shape[1:] = [1] * (len(view_shape) - 1) # [batch_size, 1]
+    repeat_shape = list(idx.shape) # [batch_size, 512]
     repeat_shape[0] = 1
     batch_indices = torch.arange(B, dtype=torch.long).to(device).view(view_shape).repeat(repeat_shape)
-    new_points = points[batch_indices, idx, :]
+    new_points = points[batch_indices, idx, :] # batch_indices和idx均为[B, S]，然后逐元素取值, 输出维度的前几个维度为batch_indices的shape，最后一个维度是points的最后一个维度
     return new_points
 
 
@@ -72,15 +72,15 @@ def farthest_point_sample(xyz, npoint):
     B, N, C = xyz.shape
     centroids = torch.zeros(B, npoint, dtype=torch.long).to(device)
     distance = torch.ones(B, N).to(device) * 1e10
-    farthest = torch.randint(0, N, (B,), dtype=torch.long).to(device)
+    farthest = torch.randint(0, N, (B,), dtype=torch.long).to(device) # 为每帧选取一个初始点 
     batch_indices = torch.arange(B, dtype=torch.long).to(device)
     for i in range(npoint):
-        centroids[:, i] = farthest
-        centroid = xyz[batch_indices, farthest, :].view(B, 1, 3)
-        dist = torch.sum((xyz - centroid) ** 2, -1)
-        mask = dist < distance
-        distance[mask] = dist[mask]
-        farthest = torch.max(distance, -1)[1]
+        centroids[:, i] = farthest # 初始点
+        centroid = xyz[batch_indices, farthest, :].view(B, 1, 3) # 取出最新的最远点作为中心
+        dist = torch.sum((xyz - centroid) ** 2, -1) # 计算每帧中所有点到centroid的距离，
+        mask = dist < distance # 初始时全为true，若与新采样点的距离更近，则更新
+        distance[mask] = dist[mask] # distance中存储的一直是所有点距离采样点最近的距离
+        farthest = torch.max(distance, -1)[1] # 确定每帧最远点的index
     return centroids
 
 
@@ -93,17 +93,18 @@ def query_ball_point(radius, nsample, xyz, new_xyz):
         new_xyz: query points, [B, S, 3]
     Return:
         group_idx: grouped points index, [B, S, nsample]
+    该代码会出现query_ball内没有点的情况，导致group_idx存在非法N
     """
     device = xyz.device
     B, N, C = xyz.shape
     _, S, _ = new_xyz.shape
     group_idx = torch.arange(N, dtype=torch.long).to(device).view(1, 1, N).repeat([B, S, 1])
-    sqrdists = square_distance(new_xyz, xyz)
-    group_idx[sqrdists > radius ** 2] = N
-    group_idx = group_idx.sort(dim=-1)[0][:, :, :nsample]
+    sqrdists = square_distance(new_xyz, xyz) # [24, 512, 3], [24, 1024, 3]，计算均方距离
+    group_idx[sqrdists > radius ** 2] = N # 在query ball之外的设置为N，N非法
+    group_idx = group_idx.sort(dim=-1)[0][:, :, :nsample] # 最后一个维度升序排列，然后取前nsample个点
     group_first = group_idx[:, :, 0].view(B, S, 1).repeat([1, 1, nsample])
-    mask = group_idx == N
-    group_idx[mask] = group_first[mask]
+    mask = group_idx == N # 取idx为N的位置
+    group_idx[mask] = group_first[mask] # idx为N处的点用query_ball中最小索引代替
     return group_idx
 
 
@@ -120,12 +121,12 @@ def sample_and_group(npoint, radius, nsample, xyz, points, returnfps=False):
         new_points: sampled points data, [B, npoint, nsample, 3+D]
     """
     B, N, C = xyz.shape
-    S = npoint
+    S = npoint # 需要采样的点数量
     fps_idx = farthest_point_sample(xyz, npoint) # [B, npoint, C]
-    new_xyz = index_points(xyz, fps_idx)
-    idx = query_ball_point(radius, nsample, xyz, new_xyz)
+    new_xyz = index_points(xyz, fps_idx) # [B,npoint, 3]
+    idx = query_ball_point(radius, nsample, xyz, new_xyz) # 为每个采样点查找邻域点，最多nsample个
     grouped_xyz = index_points(xyz, idx) # [B, npoint, nsample, C]
-    grouped_xyz_norm = grouped_xyz - new_xyz.view(B, S, 1, C)
+    grouped_xyz_norm = grouped_xyz - new_xyz.view(B, S, 1, C) # 计算query_ball内的点与query point的相对坐标
 
     if points is not None:
         grouped_points = index_points(points, idx)
@@ -150,7 +151,7 @@ def sample_and_group_all(xyz, points):
     device = xyz.device
     B, N, C = xyz.shape
     new_xyz = torch.zeros(B, 1, C).to(device)
-    grouped_xyz = xyz.view(B, 1, N, C)
+    grouped_xyz = xyz.view(B, 1, N, C) # 相当于只采样一个点，然后ground所有的点
     if points is not None:
         new_points = torch.cat([grouped_xyz, points.view(B, 1, N, -1)], dim=-1)
     else:
@@ -182,9 +183,9 @@ class PointNetSetAbstraction(nn.Module):
             new_xyz: sampled points position data, [B, C, S]
             new_points_concat: sample points feature data, [B, D', S]
         """
-        xyz = xyz.permute(0, 2, 1)
+        xyz = xyz.permute(0, 2, 1) # [B, N, C] to [B, C, N]
         if points is not None:
-            points = points.permute(0, 2, 1)
+            points = points.permute(0, 2, 1) # [B, C, N] to [B, N, C]
 
         if self.group_all:
             new_xyz, new_points = sample_and_group_all(xyz, points)
@@ -193,11 +194,11 @@ class PointNetSetAbstraction(nn.Module):
         # new_xyz: sampled points position data, [B, npoint, C]
         # new_points: sampled points data, [B, npoint, nsample, C+D]
         new_points = new_points.permute(0, 3, 2, 1) # [B, C+D, nsample,npoint]
-        for i, conv in enumerate(self.mlp_convs):
+        for i, conv in enumerate(self.mlp_convs): # 使用1x1 conv对每个点特征进行空间编码
             bn = self.mlp_bns[i]
             new_points =  F.relu(bn(conv(new_points)))
 
-        new_points = torch.max(new_points, 2)[0]
+        new_points = torch.max(new_points, 2)[0] # 对query_ball内的特征取max-pooling，得到表征局部空间的点特征
         new_xyz = new_xyz.permute(0, 2, 1)
         return new_xyz, new_points
 
@@ -230,27 +231,27 @@ class PointNetSetAbstractionMsg(nn.Module):
             new_xyz: sampled points position data, [B, C, S]
             new_points_concat: sample points feature data, [B, D', S]
         """
-        xyz = xyz.permute(0, 2, 1)
+        xyz = xyz.permute(0, 2, 1) # [B, N, C]
         if points is not None:
             points = points.permute(0, 2, 1)
 
         B, N, C = xyz.shape
-        S = self.npoint
+        S = self.npoint # sample num
         new_xyz = index_points(xyz, farthest_point_sample(xyz, S))
         new_points_list = []
-        for i, radius in enumerate(self.radius_list):
-            K = self.nsample_list[i]
+        for i, radius in enumerate(self.radius_list): # 以相同采样点为中心，以不同的query radius进行group
+            K = self.nsample_list[i] # query ball内最大点数
             group_idx = query_ball_point(radius, K, xyz, new_xyz)
             grouped_xyz = index_points(xyz, group_idx)
-            grouped_xyz -= new_xyz.view(B, S, 1, C)
+            grouped_xyz -= new_xyz.view(B, S, 1, C) # 以采样点为中心，计算query ball内所有点与采样点的相对坐标
             if points is not None:
-                grouped_points = index_points(points, group_idx)
-                grouped_points = torch.cat([grouped_points, grouped_xyz], dim=-1)
+                grouped_points = index_points(points, group_idx) # 以group_idx取group对应的点特征
+                grouped_points = torch.cat([grouped_points, grouped_xyz], dim=-1) # 将原始点云坐标和点特征进行concat
             else:
                 grouped_points = grouped_xyz
 
             grouped_points = grouped_points.permute(0, 3, 2, 1)  # [B, D, K, S]
-            for j in range(len(self.conv_blocks[i])):
+            for j in range(len(self.conv_blocks[i])): # 使用MLP+Max-pooling(mini-poinet)提取点云特征
                 conv = self.conv_blocks[i][j]
                 bn = self.bn_blocks[i][j]
                 grouped_points =  F.relu(bn(conv(grouped_points)))
@@ -258,7 +259,7 @@ class PointNetSetAbstractionMsg(nn.Module):
             new_points_list.append(new_points)
 
         new_xyz = new_xyz.permute(0, 2, 1)
-        new_points_concat = torch.cat(new_points_list, dim=1)
+        new_points_concat = torch.cat(new_points_list, dim=1) # 在特征通道维度上进行concat，到此就聚集了不同半径下的局部点云特征
         return new_xyz, new_points_concat
 
 
@@ -283,32 +284,32 @@ class PointNetFeaturePropagation(nn.Module):
         Return:
             new_points: upsampled points data, [B, D', N]
         """
-        xyz1 = xyz1.permute(0, 2, 1)
-        xyz2 = xyz2.permute(0, 2, 1)
+        xyz1 = xyz1.permute(0, 2, 1) # [2, 128, 3]
+        xyz2 = xyz2.permute(0, 2, 1) # [2, 1, 3] 
 
-        points2 = points2.permute(0, 2, 1)
+        points2 = points2.permute(0, 2, 1) # [2, 1, 1024]
         B, N, C = xyz1.shape
         _, S, _ = xyz2.shape
 
         if S == 1:
             interpolated_points = points2.repeat(1, N, 1)
-        else:
+        else: # 根据距离对浅层特征加权，得到上采样后的特征
             dists = square_distance(xyz1, xyz2)
-            dists, idx = dists.sort(dim=-1)
-            dists, idx = dists[:, :, :3], idx[:, :, :3]  # [B, N, 3]
+            dists, idx = dists.sort(dim=-1) # 按距离升序
+            dists, idx = dists[:, :, :3], idx[:, :, :3]  # [B, N, 3]，为xyz1每个点找到最近的3个xyz2的点
 
-            dist_recip = 1.0 / (dists + 1e-8)
-            norm = torch.sum(dist_recip, dim=2, keepdim=True)
+            dist_recip = 1.0 / (dists + 1e-8) # 按反距离加权
+            norm = torch.sum(dist_recip, dim=2, keepdim=True) # 归一化每个点的权重
             weight = dist_recip / norm
-            interpolated_points = torch.sum(index_points(points2, idx) * weight.view(B, N, 3, 1), dim=2)
+            interpolated_points = torch.sum(index_points(points2, idx) * weight.view(B, N, 3, 1), dim=2) # 按距离加权求和，得到上采样后的点特征
 
         if points1 is not None:
             points1 = points1.permute(0, 2, 1)
-            new_points = torch.cat([points1, interpolated_points], dim=-1)
+            new_points = torch.cat([points1, interpolated_points], dim=-1) # 将上采样的特征和SA层同分辨率的点特征进行concat
         else:
             new_points = interpolated_points
 
-        new_points = new_points.permute(0, 2, 1)
+        new_points = new_points.permute(0, 2, 1) # 将特征维度transpose到第二个维度，符合后续卷积的输入要求
         for i, conv in enumerate(self.mlp_convs):
             bn = self.mlp_bns[i]
             new_points = F.relu(bn(conv(new_points)))

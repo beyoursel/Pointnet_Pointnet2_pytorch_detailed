@@ -15,7 +15,7 @@ class get_model(nn.Module):
         self.fp3 = PointNetFeaturePropagation(128+128+256, [256, 256])
         self.fp2 = PointNetFeaturePropagation(32+64+256, [256, 128])
         self.fp1 = PointNetFeaturePropagation(128, [128, 128, 128])
-        self.conv1 = nn.Conv1d(128, 128, 1)
+        self.conv1 = nn.Conv1d(128, 128, 1) # 共享MLP
         self.bn1 = nn.BatchNorm1d(128)
         self.drop1 = nn.Dropout(0.5)
         self.conv2 = nn.Conv1d(128, num_classes, 1)
